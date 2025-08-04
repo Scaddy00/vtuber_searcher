@@ -37,3 +37,10 @@ class Config:
         """Get database path"""
         return self.config.get('database', {}).get('path', 'data/vtuber_searcher.db')
     
+    def get_flask_address(self) -> str:
+        """Get Flask address"""
+        return self.config.get('flask', {}).get('address', '0.0.0.0')
+    
+    def get_flask_port(self) -> int:
+        """Get Flask port"""
+        return self.config.get('flask', {}).get('port', 5000)

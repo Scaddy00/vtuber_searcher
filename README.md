@@ -20,6 +20,13 @@ A powerful tool for discovering VTuber content creators across multiple platform
 - **Statistics**: View counts, video counts, and subscriber information (YouTube)
 - **Metadata**: Discovery timestamps and platform-specific data
 
+### **Web Interface**
+- **Modern UI**: Beautiful Bootstrap-based web interface
+- **Real-time Search**: Instant search as you type (debounced)
+- **Responsive Design**: Works on desktop, tablet, and mobile
+- **Live Indicators**: Shows when VTubers are currently streaming
+- **Platform Icons**: Visual distinction between Twitch and YouTube results
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -54,6 +61,13 @@ A powerful tool for discovering VTuber content creators across multiple platform
 
 ### Usage
 
+#### Web Interface (Recommended)
+```bash
+python app.py
+```
+Then open your browser and go to `http://localhost:5000`
+
+#### Programmatic Usage
 ```python
 from app.scrapers import search_vtuber
 import asyncio
@@ -105,9 +119,11 @@ vtuber_searcher/
 │       ├── __init__.py          # Main search function
 │       ├── twitch_scraper.py    # Twitch API integration
 │       └── youtube_scraper.py   # YouTube API integration
+├── templates/
+│   └── index.html               # Web interface template
 ├── config/
 │   └── config.yaml              # API configuration
-├── app.py                       # Main application
+├── app.py                       # Flask web application
 ├── requirements.txt              # Python dependencies
 └── README.md                    # This file
 ```
@@ -129,6 +145,13 @@ vtuber_searcher/
   - Anime-related terms
   - Streaming/content creation terms
 - **Quality Thresholds**: Configurable scoring thresholds per platform
+
+### Web Interface Features
+- **Debounced Search**: Prevents excessive API calls while typing
+- **Real-time Updates**: Results appear instantly as you type
+- **Loading States**: Visual feedback during search operations
+- **Error Handling**: Graceful error messages for failed searches
+- **Responsive Design**: Optimized for all device sizes
 
 ### Debug Features
 - **Detailed Logging**: Shows each step of the search process
@@ -171,6 +194,14 @@ vtuber_searcher/
 
 ## 🔍 Advanced Usage
 
+### Web Interface
+The web interface provides an intuitive way to search for VTubers:
+
+1. **Start the server**: `python app.py`
+2. **Open browser**: Navigate to `http://localhost:5000`
+3. **Start typing**: Results appear automatically as you type
+4. **Click results**: Direct links to VTuber channels
+
 ### Debug Mode
 Enable detailed logging to understand the search process:
 
@@ -201,6 +232,7 @@ self.vtuber_keywords = [
 - **google-api-python-client**: YouTube Data API v3 client
 - **pyyaml**: YAML configuration file parsing
 - **asyncio**: Asynchronous programming support
+- **flask**: Web framework for the interface
 
 ## 🤝 Contributing
 
@@ -226,7 +258,8 @@ If you encounter any issues or have questions:
 ## 🔮 Future Enhancements
 
 - **Database Integration**: Store and cache search results
-- **Web Interface**: GUI for easier searching
 - **More Platforms**: Support for additional streaming platforms
 - **Advanced Analytics**: Search trends and VTuber discovery metrics
 - **Real-time Updates**: Live monitoring of VTuber activity
+- **User Accounts**: Save favorite VTubers and search history
+- **Mobile App**: Native mobile application

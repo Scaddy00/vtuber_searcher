@@ -11,5 +11,8 @@ pyyaml==6.0.1
 requests==2.31.0
 aiohttp==3.9.1
 
+# Web Framework
+flask==3.0.0
+
 # Database
 sqlalchemy==2.0.39
