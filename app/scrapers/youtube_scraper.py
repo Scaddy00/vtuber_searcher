@@ -23,11 +23,11 @@ class YouTubeScraper:
     
     def _is_vtuber_channel(self, channel_info: Dict[str, Any], debug: bool = False) -> bool:
         """Check if a channel is likely a VTuber based on various indicators"""
-        return self.filters.is_vtuber_channel(channel_info, platform='youtube', debug=debug)
+        return self.filters.is_vtuber_channel_adaptive(channel_info, platform='youtube', debug=debug)
     
     def _is_name_match(self, channel_title: str, search_name: str, debug: bool = False) -> bool:
         """Check if the channel title matches the search name"""
-        return self.filters.is_name_match(channel_title, search_name, debug)
+        return self.filters.is_name_match_fuzzy(channel_title, search_name, debug)
     
     async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make request to YouTube Data API"""
@@ -125,7 +125,7 @@ class YouTubeScraper:
                         print(f"[DEBUG] Channel '{channel_title}' - VTuber: {is_vtuber}")
                     
                     if channel and is_vtuber:
-                        score, reasons = self.filters.calculate_vtuber_score(channel, platform='youtube')
+                        score, reasons, threshold = self.filters.calculate_adaptive_score(channel, platform='youtube')
                         language_focus = self.filters.get_language_focus(channel, platform='youtube')
                         
                         vtuber = {

@@ -4,6 +4,7 @@ VTuber filtering system for Italian and English markets
 
 import re
 from typing import Dict, Any, List, Tuple
+from datetime import datetime
 
 class VTuberFilters:
     """Centralized VTuber filtering system for Italian and English markets"""
@@ -142,6 +143,76 @@ class VTuberFilters:
         
         if debug:
             print(f"[DEBUG] No match found")
+        
+        return False
+    
+    def is_name_match_fuzzy(self, channel_name: str, search_name: str, threshold: float = 0.6, debug: bool = False) -> bool:
+        """Enhanced name matching with fuzzy logic"""
+        
+        # Normalize names
+        channel_clean = re.sub(r'[^\w\s]', '', channel_name.lower())
+        search_clean = re.sub(r'[^\w\s]', '', search_name.lower())
+        
+        if debug:
+            print(f"[DEBUG] Fuzzy matching: '{channel_clean}' vs '{search_clean}'")
+        
+        # Exact match (highest priority)
+        if channel_clean == search_clean:
+            if debug:
+                print(f"[DEBUG] Exact match found!")
+            return True
+        
+        # Check if search name is contained in channel name
+        if search_clean in channel_clean:
+            if debug:
+                print(f"[DEBUG] Search name contained in channel name")
+            return True
+        
+        # Check if channel name is contained in search name
+        if channel_clean in search_clean:
+            if debug:
+                print(f"[DEBUG] Channel name contained in search name")
+            return True
+        
+        # Word-based matching (more flexible)
+        search_words = search_clean.split()
+        channel_words = channel_clean.split()
+        
+        if debug:
+            print(f"[DEBUG] Search words: {search_words}")
+            print(f"[DEBUG] Channel words: {channel_words}")
+        
+        # If search name has multiple words, check if most words match
+        if len(search_words) > 1:
+            matching_words = sum(1 for word in search_words if any(word in cw for cw in channel_words))
+            match_percentage = matching_words / len(search_words)
+            if debug:
+                print(f"[DEBUG] Matching words: {matching_words}/{len(search_words)} ({match_percentage:.2f})")
+            if match_percentage >= 0.5:  # Lower threshold for fuzzy matching
+                return True
+        
+        # Single word search - more flexible matching
+        if len(search_words) == 1:
+            search_word = search_words[0]
+            # Check if the search word appears in any channel word
+            for channel_word in channel_words:
+                if search_word in channel_word or channel_word in search_word:
+                    if debug:
+                        print(f"[DEBUG] Single word match: '{search_word}' in '{channel_word}'")
+                    return True
+        
+        # Check for partial word matches (e.g., "luna" matches "lunaria")
+        for search_word in search_words:
+            for channel_word in channel_words:
+                # Check if words share a common prefix or suffix
+                if (len(search_word) >= 3 and len(channel_word) >= 3 and
+                    (search_word[:3] in channel_word or channel_word[:3] in search_word)):
+                    if debug:
+                        print(f"[DEBUG] Partial word match: '{search_word}' ~ '{channel_word}'")
+                    return True
+        
+        if debug:
+            print(f"[DEBUG] No fuzzy match found")
         
         return False
     
@@ -401,3 +472,76 @@ class VTuberFilters:
         """Check if channel is VTuber based solely on tags (highest priority)"""
         has_tags, found_tags = self.has_vtuber_tags(tags)
         return has_tags 
+
+    def calculate_adaptive_score(self, channel_data: Dict[str, Any], platform: str = 'twitch') -> Tuple[int, str]:
+        """Calculate VTuber score with adaptive thresholds and dynamic bonuses"""
+        
+        # Get base score
+        base_score, base_reasons = self.calculate_vtuber_score(channel_data, platform)
+        
+        # Adaptive scoring based on platform and context
+        adaptive_reasons = []
+        
+        if platform == 'twitch':
+            # Lower threshold for Twitch (more VTuber activity)
+            threshold = 2
+            # Bonus for live streaming
+            if channel_data.get('is_live', False):
+                base_score += 1
+                adaptive_reasons.append("Live streaming bonus")
+            
+            # Bonus for verified/partner channels
+            broadcaster_type = channel_data.get('broadcaster_type', '')
+            if broadcaster_type in ['partner', 'affiliate']:
+                base_score += 2
+                adaptive_reasons.append(f"Verified channel bonus ({broadcaster_type})")
+            
+            # Bonus for high viewer count (indicates established VTuber)
+            viewer_count = channel_data.get('viewer_count', 0)
+            if viewer_count > 100:
+                base_score += 1
+                adaptive_reasons.append(f"High viewer count bonus ({viewer_count})")
+            
+        else:  # YouTube
+            # Higher threshold for YouTube (more diverse content)
+            threshold = 2.5
+            
+            # Bonus for high subscriber count
+            subscriber_count = channel_data.get('subscriber_count', '0')
+            try:
+                sub_count = int(subscriber_count)
+                if sub_count > 1000:
+                    base_score += 1
+                    adaptive_reasons.append(f"High subscriber count bonus ({sub_count})")
+            except (ValueError, TypeError):
+                pass
+        
+        # Bonus for recent activity (VTubers are typically active)
+        discovered_at = channel_data.get('discovered_at')
+        if discovered_at:
+            try:
+                discovery_time = datetime.fromisoformat(discovered_at.replace('Z', '+00:00'))
+                if (datetime.now() - discovery_time).days < 7:
+                    base_score += 0.5
+                    adaptive_reasons.append("Recent activity bonus")
+            except (ValueError, TypeError):
+                pass
+        
+        # Combine reasons
+        all_reasons = [base_reasons]
+        if adaptive_reasons:
+            all_reasons.extend(adaptive_reasons)
+        
+        return base_score, '; '.join(all_reasons), threshold
+    
+    def is_vtuber_channel_adaptive(self, channel_data: Dict[str, Any], platform: str = 'twitch', debug: bool = False) -> bool:
+        """Check if a channel is likely a VTuber using adaptive scoring"""
+        
+        score, reasons, threshold = self.calculate_adaptive_score(channel_data, platform)
+        
+        if debug:
+            channel_name = channel_data.get('display_name', channel_data.get('snippet', {}).get('title', 'Unknown'))
+            print(f"[DEBUG] Adaptive VTuber score for '{channel_name}': {score} (threshold: {threshold})")
+            print(f"[DEBUG] Reasons: {reasons}")
+        
+        return score >= threshold 
