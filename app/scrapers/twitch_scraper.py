@@ -7,28 +7,17 @@ import aiohttp
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
 from .vtuber_filters import VTuberFilters
+from .base_scraper import BaseScraper
 
-class TwitchScraper:
+class TwitchScraper(BaseScraper):
     """Scrapes Twitch for VTuber content creators (Italian and English focused)"""
     
     def __init__(self, client_id: str, client_secret: str):
+        super().__init__()
         self.client_id = client_id
         self.client_secret = client_secret
         self.access_token = None
         self.base_url = "https://api.twitch.tv/helix"
-        
-        # Initialize VTuber filters
-        self.filters = VTuberFilters()
-    
-    def _is_name_match(self, channel_name: str, search_name: str, debug: bool = False) -> bool:
-        """Check if the channel name matches the search name"""
-        return self.filters.is_name_match(channel_name, search_name, debug)
-    
-    def _is_vtuber_channel(self, channel_info: Dict[str, Any], user_info: Dict[str, Any], debug: bool = False) -> bool:
-        """Check if a channel is likely a VTuber based on enhanced scoring"""
-        # Combine channel and user info for analysis
-        combined_data = {**channel_info, **user_info}
-        return self.filters.is_vtuber_channel(combined_data, platform='twitch', debug=debug)
     
     async def _get_access_token(self) -> str:
         """Get Twitch access token"""
@@ -215,7 +204,8 @@ class TwitchScraper:
                                     'vtuber_score': 10,  # High score for tag-based detection
                                     'vtuber_reasons': f"VTuber tag detected: {[tag for tag in tag_names if any(vt in tag.lower() for vt in ['vtuber', 'virtual', 'live2d', 'anime'])]}",
                                     'language_focus': self.filters.get_language_focus({**stream, **user}, platform='twitch'),
-                                    'discovered_at': datetime.now().isoformat()
+                                    'discovered_at': datetime.now().isoformat(),
+                                    'search_stage': 'tags'
                                 }
                                 vtubers.append(vtuber)
             
@@ -241,7 +231,7 @@ class TwitchScraper:
             print(f"[INFO] Searching Twitch for VTuber: {vtuber_name}")
             
             # Use enhanced multi-stage search
-            results = await self.find_vtuber_enhanced(vtuber_name, debug=debug)
+            results = await self.find_vtuber_enhanced(vtuber_name, platform='twitch', debug=debug)
             
             if results:
                 print(f"[INFO] Enhanced search found {len(results)} VTubers")
@@ -284,8 +274,8 @@ class TwitchScraper:
                     if debug:
                         print(f"[DEBUG] Live channel: '{channel['display_name']}' - Name match: {name_matches}")
                     
-                    if name_matches and self._is_vtuber_channel(channel, user, debug=debug):
-                        score, reasons = self.filters.calculate_vtuber_score({**channel, **user}, platform='twitch')
+                    if name_matches and self._is_vtuber_channel({**channel, **user}, platform='twitch', debug=debug):
+                        score, reasons, threshold = self.filters.calculate_adaptive_score({**channel, **user}, platform='twitch')
                         language_focus = self.filters.get_language_focus({**channel, **user}, platform='twitch')
                         
                         vtuber = {
@@ -322,9 +312,9 @@ class TwitchScraper:
                         if debug:
                             print(f"[DEBUG] Channel: '{channel['display_name']}' - Name match: {name_matches}")
                         
-                        if name_matches and self._is_vtuber_channel(channel, user, debug=debug):
+                        if name_matches and self._is_vtuber_channel({**channel, **user}, platform='twitch', debug=debug):
                             broadcaster_type = user.get('broadcaster_type', '')
-                            score, reasons = self.filters.calculate_vtuber_score({**channel, **user}, platform='twitch')
+                            score, reasons, threshold = self.filters.calculate_adaptive_score({**channel, **user}, platform='twitch')
                             language_focus = self.filters.get_language_focus({**channel, **user}, platform='twitch')
                             
                             # Prioritize verified channels
@@ -368,226 +358,4 @@ class TwitchScraper:
         except Exception as e:
             print(f"[ERROR] Error searching for '{vtuber_name}': {e}")
             return []
-    
-    async def find_vtuber_enhanced(self, vtuber_name: str, debug: bool = False) -> List[Dict[str, Any]]:
-        """Enhanced VTuber search with multiple strategies"""
-        
-        try:
-            print(f"[INFO] Starting enhanced search for VTuber: {vtuber_name}")
-            
-            results = []
-            
-            # Stage 1: Tag-based search (highest precision)
-            print(f"[INFO] Stage 1: Tag-based search")
-            tag_results = await self.find_vtuber_by_tags(vtuber_name, debug=debug)
-            results.extend(tag_results)
-            print(f"[INFO] Stage 1 found {len(tag_results)} results")
-            
-            # Stage 2: Fuzzy name search with relaxed VTuber filtering
-            print(f"[INFO] Stage 2: Fuzzy name search")
-            fuzzy_results = await self.find_vtuber_fuzzy(vtuber_name, debug=debug)
-            results.extend(fuzzy_results)
-            print(f"[INFO] Stage 2 found {len(fuzzy_results)} results")
-            
-            # Stage 3: Content-based search (analyze descriptions)
-            print(f"[INFO] Stage 3: Content-based search")
-            content_results = await self.find_vtuber_by_content(vtuber_name, debug=debug)
-            results.extend(content_results)
-            print(f"[INFO] Stage 3 found {len(content_results)} results")
-            
-            # Remove duplicates and sort by relevance
-            unique_results = self.remove_duplicates(results)
-            sorted_results = self.sort_by_relevance(unique_results)
-            
-            print(f"[INFO] Enhanced search completed. Total unique results: {len(sorted_results)}")
-            return sorted_results
-            
-        except Exception as e:
-            print(f"[ERROR] Error in enhanced search for '{vtuber_name}': {e}")
-            return []
-    
-    async def find_vtuber_fuzzy(self, vtuber_name: str, debug: bool = False) -> List[Dict[str, Any]]:
-        """Find VTubers using fuzzy name matching with relaxed filtering"""
-        
-        try:
-            print(f"[INFO] Fuzzy search for VTuber: {vtuber_name}")
-            
-            # Search for channels with broader query
-            channels = await self.search_channels(vtuber_name, max_results=100)
-            
-            if not channels:
-                return []
-            
-            # Get detailed user info
-            user_ids = [ch['id'] for ch in channels]
-            user_info = await self.get_user_info(user_ids)
-            
-            vtubers = []
-            
-            for channel in channels:
-                user = next((u for u in user_info if u['id'] == channel['id']), None)
-                if not user:
-                    continue
-                
-                # Use fuzzy name matching
-                name_matches = self.filters.is_name_match_fuzzy(
-                    channel['display_name'], vtuber_name, debug=debug
-                )
-                
-                if name_matches:
-                    # Use adaptive scoring with lower threshold
-                    combined_data = {**channel, **user}
-                    is_vtuber = self.filters.is_vtuber_channel_adaptive(
-                        combined_data, platform='twitch', debug=debug
-                    )
-                    
-                    if is_vtuber:
-                        score, reasons, threshold = self.filters.calculate_adaptive_score(
-                            combined_data, platform='twitch'
-                        )
-                        
-                        vtuber = {
-                            'platform': 'twitch',
-                            'id': channel['id'],
-                            'name': channel['display_name'],
-                            'url': f"https://twitch.tv/{user['login']}",
-                            'language': user.get('broadcaster_language', ''),
-                            'avatar_url': user.get('profile_image_url', ''),
-                            'is_live': False,
-                            'broadcaster_type': user.get('broadcaster_type', ''),
-                            'description': user.get('description', ''),
-                            'vtuber_score': score,
-                            'vtuber_reasons': reasons,
-                            'language_focus': self.filters.get_language_focus(combined_data, platform='twitch'),
-                            'discovered_at': datetime.now().isoformat(),
-                            'search_stage': 'fuzzy'
-                        }
-                        vtubers.append(vtuber)
-            
-            return vtubers
-            
-        except Exception as e:
-            print(f"[ERROR] Error in fuzzy search for '{vtuber_name}': {e}")
-            return []
-    
-    async def find_vtuber_by_content(self, vtuber_name: str, debug: bool = False) -> List[Dict[str, Any]]:
-        """Find VTubers by analyzing content descriptions and titles"""
-        
-        try:
-            print(f"[INFO] Content-based search for VTuber: {vtuber_name}")
-            
-            # Search for live streams to analyze content
-            live_streams = await self.search_live_streams(vtuber_name, max_results=50)
-            
-            if not live_streams:
-                return []
-            
-            # Get user info for streams
-            user_ids = [stream['user_id'] for stream in live_streams]
-            user_info = await self.get_user_info(user_ids)
-            
-            vtubers = []
-            
-            for stream in live_streams:
-                user = next((u for u in user_info if u['id'] == stream['user_id']), None)
-                if not user:
-                    continue
-                
-                # Analyze stream title and description for VTuber content
-                stream_title = stream.get('title', '').lower()
-                user_description = user.get('description', '').lower()
-                
-                # Check for VTuber content indicators
-                content_indicators = [
-                    'vtuber', 'virtual', 'avatar', 'anime', 'live2d',
-                    'kawaii', 'moe', 'otaku', 'japanese', 'character'
-                ]
-                
-                has_vtuber_content = any(
-                    indicator in stream_title or indicator in user_description
-                    for indicator in content_indicators
-                )
-                
-                if has_vtuber_content:
-                    # Use name matching (can be more flexible for content-based search)
-                    name_matches = self.filters.is_name_match(
-                        user['display_name'], vtuber_name, debug=debug
-                    )
-                    
-                    if name_matches:
-                        combined_data = {**stream, **user}
-                        score, reasons, threshold = self.filters.calculate_adaptive_score(
-                            combined_data, platform='twitch'
-                        )
-                        
-                        # Lower threshold for content-based results
-                        if score >= max(threshold - 1, 1):
-                            vtuber = {
-                                'platform': 'twitch',
-                                'id': stream['user_id'],
-                                'name': user['display_name'],
-                                'url': f"https://twitch.tv/{user['login']}",
-                                'language': user.get('broadcaster_language', ''),
-                                'avatar_url': user.get('profile_image_url', ''),
-                                'is_live': True,
-                                'broadcaster_type': user.get('broadcaster_type', ''),
-                                'description': user.get('description', ''),
-                                'stream_title': stream.get('title', ''),
-                                'viewer_count': stream.get('viewer_count', 0),
-                                'vtuber_score': score,
-                                'vtuber_reasons': reasons,
-                                'language_focus': self.filters.get_language_focus(combined_data, platform='twitch'),
-                                'discovered_at': datetime.now().isoformat(),
-                                'search_stage': 'content'
-                            }
-                            vtubers.append(vtuber)
-            
-            return vtubers
-            
-        except Exception as e:
-            print(f"[ERROR] Error in content-based search for '{vtuber_name}': {e}")
-            return []
-    
-    def remove_duplicates(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove duplicate VTubers based on user ID"""
-        unique_results = {}
-        
-        for vtuber in results:
-            vtuber_id = vtuber['id']
-            if vtuber_id not in unique_results:
-                unique_results[vtuber_id] = vtuber
-            else:
-                # Keep the one with higher score or more recent
-                existing = unique_results[vtuber_id]
-                if vtuber.get('vtuber_score', 0) > existing.get('vtuber_score', 0):
-                    unique_results[vtuber_id] = vtuber
-        
-        return list(unique_results.values())
-    
-    def sort_by_relevance(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sort results by relevance score"""
-        
-        def relevance_score(vtuber):
-            score = vtuber.get('vtuber_score', 0)
-            
-            # Bonus for live streams
-            if vtuber.get('is_live', False):
-                score += 2
-            
-            # Bonus for verified channels
-            if vtuber.get('broadcaster_type') in ['partner', 'affiliate']:
-                score += 1
-            
-            # Bonus for high viewer count
-            viewer_count = vtuber.get('viewer_count', 0)
-            if viewer_count > 100:
-                score += 0.5
-            
-            # Bonus for tag-based results (highest confidence)
-            if vtuber.get('search_stage') == 'tags':
-                score += 3
-            
-            return score
-        
-        return sorted(results, key=relevance_score, reverse=True)
     

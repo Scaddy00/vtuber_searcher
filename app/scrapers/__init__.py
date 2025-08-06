@@ -4,8 +4,11 @@ VTuber scrapers module
 
 from typing import Dict, List, Any
 import asyncio
+from .base_scraper import BaseScraper
 from .twitch_scraper import TwitchScraper
 from .youtube_scraper import YouTubeScraper
+
+__all__ = ['BaseScraper', 'TwitchScraper', 'YouTubeScraper']
 
 async def search_vtuber(
     vtuber_name: str, 

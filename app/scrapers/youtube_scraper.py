@@ -9,25 +9,18 @@ from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from .vtuber_filters import VTuberFilters
+from .base_scraper import BaseScraper
 
-class YouTubeScraper:
+class YouTubeScraper(BaseScraper):
     """Scrapes YouTube for VTuber content creators"""
     
     def __init__(self, api_key: str):
+        super().__init__()
         self.api_key = api_key
         self.base_url = "https://www.googleapis.com/youtube/v3"
         self.youtube_service = build('youtube', 'v3', developerKey=api_key)
-        
-        # Initialize VTuber filters
-        self.filters = VTuberFilters()
     
-    def _is_vtuber_channel(self, channel_info: Dict[str, Any], debug: bool = False) -> bool:
-        """Check if a channel is likely a VTuber based on various indicators"""
-        return self.filters.is_vtuber_channel_adaptive(channel_info, platform='youtube', debug=debug)
-    
-    def _is_name_match(self, channel_title: str, search_name: str, debug: bool = False) -> bool:
-        """Check if the channel title matches the search name"""
-        return self.filters.is_name_match_fuzzy(channel_title, search_name, debug)
+
     
     async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make request to YouTube Data API"""
@@ -63,7 +56,7 @@ class YouTubeScraper:
         data = await self._make_request('search', params)
         return data.get('items', []) if data else []
     
-    async def get_channel_info(self, channel_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_user_info(self, channel_ids: List[str]) -> List[Dict[str, Any]]:
         """Get detailed channel information"""
         if not channel_ids:
             return []
@@ -81,10 +74,117 @@ class YouTubeScraper:
         
         return all_channels
     
+    async def search_live_streams(self, query: str, max_results: int = 50) -> List[Dict[str, Any]]:
+        """Search for live streams that match the query"""
+        params = {
+            'part': 'snippet',
+            'q': query,
+            'type': 'video',
+            'eventType': 'live',  # Only live streams
+            'maxResults': min(max_results, 50),
+            'order': 'relevance'
+        }
+        
+        data = await self._make_request('search', params)
+        return data.get('items', []) if data else []
+    
+    async def get_video_tags(self, video_id: str) -> List[str]:
+        """Get tags for a specific video"""
+        params = {
+            'part': 'snippet',
+            'id': video_id
+        }
+        
+        data = await self._make_request('videos', params)
+        if data and data.get('items'):
+            video = data['items'][0]
+            return video.get('snippet', {}).get('tags', [])
+        return []
+    
+    async def search_videos_by_tag(self, tag: str, max_results: int = 50) -> List[Dict[str, Any]]:
+        """Search for videos with specific tag"""
+        params = {
+            'part': 'snippet',
+            'q': tag,
+            'type': 'video',
+            'maxResults': min(max_results, 50),
+            'order': 'relevance'
+        }
+        
+        data = await self._make_request('search', params)
+        return data.get('items', []) if data else []
+    
+    async def find_vtuber_by_content(self, vtuber_name: str, debug: bool = False) -> List[Dict[str, Any]]:
+        """Find VTubers by analyzing video content and descriptions"""
+        
+        try:
+            print(f"[INFO] Content-based search for VTuber: {vtuber_name}")
+            
+            # Search for videos with VTuber-related keywords
+            vtuber_keywords = ['vtuber', 'virtual youtuber', 'live2d', 'anime avatar', 'virtual avatar']
+            vtubers = []
+            
+            for keyword in vtuber_keywords:
+                videos = await self.search_videos_by_tag(keyword, max_results=20)
+                
+                for video in videos:
+                    channel_id = video['snippet']['channelId']
+                    channel_title = video['snippet']['channelTitle']
+                    
+                    # Check if channel name matches search
+                    name_matches = self._is_name_match(channel_title, vtuber_name, debug=debug)
+                    
+                    if name_matches:
+                        # Get detailed channel info
+                        channel_info = await self.get_user_info([channel_id])
+                        if channel_info:
+                            channel = channel_info[0]
+                            
+                            # Check if it's a VTuber channel
+                            is_vtuber = self._is_vtuber_channel(channel, platform='youtube', debug=debug)
+                            
+                            if is_vtuber:
+                                score, reasons, threshold = self.filters.calculate_adaptive_score(channel, platform='youtube')
+                                
+                                vtuber = {
+                                    'platform': 'youtube',
+                                    'id': channel['id'],
+                                    'name': channel['snippet']['title'],
+                                    'url': f"https://youtube.com/channel/{channel['id']}",
+                                    'language': channel['snippet'].get('defaultLanguage', ''),
+                                    'avatar_url': channel['snippet'].get('thumbnails', {}).get('default', {}).get('url', ''),
+                                    'subscriber_count': channel.get('statistics', {}).get('subscriberCount', '0'),
+                                    'video_count': channel.get('statistics', {}).get('videoCount', '0'),
+                                    'view_count': channel.get('statistics', {}).get('viewCount', '0'),
+                                    'description': channel['snippet'].get('description', ''),
+                                    'vtuber_score': score,
+                                    'vtuber_reasons': reasons,
+                                    'language_focus': self.filters.get_language_focus(channel, platform='youtube'),
+                                    'discovered_at': datetime.now().isoformat(),
+                                    'search_stage': 'content'
+                                }
+                                vtubers.append(vtuber)
+            
+            return vtubers
+            
+        except Exception as e:
+            print(f"[ERROR] Error in content-based search for '{vtuber_name}': {e}")
+            return []
+    
     async def find_vtuber(self, vtuber_name: str, debug: bool = False) -> List[Dict[str, Any]]:
-        """Find VTuber content creators on YouTube (filtered for VTubers only)"""
+        """Find VTuber content creators on YouTube using enhanced multi-stage search"""
         try:
             print(f"[INFO] Searching YouTube for: {vtuber_name}")
+            
+            # Use enhanced multi-stage search
+            results = await self.find_vtuber_enhanced(vtuber_name, platform='youtube', debug=debug)
+            
+            if results:
+                print(f"[INFO] Enhanced search found {len(results)} VTubers")
+                return results
+            
+            # Fallback to traditional search if enhanced search fails
+            print(f"[INFO] Enhanced search returned no results, using traditional search as fallback")
             
             # Search for channels
             channels = await self.search_channels(vtuber_name, max_results=50)
@@ -98,7 +198,7 @@ class YouTubeScraper:
             channel_ids = [channel['snippet']['channelId'] for channel in channels]
             
             # Get detailed information for each channel
-            channel_info = await self.get_channel_info(channel_ids)
+            channel_info = await self.get_user_info(channel_ids)
             
             print(f"[INFO] Retrieved detailed info for {len(channel_info)} channels")
             
@@ -119,7 +219,7 @@ class YouTubeScraper:
                 # Only proceed if name matches
                 if name_matches:
                     # Check if channel passes VTuber filter
-                    is_vtuber = self._is_vtuber_channel(channel, debug=debug)
+                    is_vtuber = self._is_vtuber_channel(channel, platform='youtube', debug=debug)
                     
                     if debug:
                         print(f"[DEBUG] Channel '{channel_title}' - VTuber: {is_vtuber}")
