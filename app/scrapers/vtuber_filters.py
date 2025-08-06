@@ -147,7 +147,7 @@ class VTuberFilters:
         return False
     
     def is_name_match_fuzzy(self, channel_name: str, search_name: str, threshold: float = 0.6, debug: bool = False) -> bool:
-        """Enhanced name matching with fuzzy logic"""
+        """Enhanced name matching with fuzzy logic - more restrictive for better precision"""
         
         # Normalize names
         channel_clean = re.sub(r'[^\w\s]', '', channel_name.lower())
@@ -162,11 +162,17 @@ class VTuberFilters:
                 print(f"[DEBUG] Exact match found!")
             return True
         
-        # Check if search name is contained in channel name
+        # Check if search name is contained in channel name (but not just a common word)
         if search_clean in channel_clean:
-            if debug:
-                print(f"[DEBUG] Search name contained in channel name")
-            return True
+            # Avoid matching common words like "gamer", "tv", "official", etc.
+            common_words = ['gamer', 'tv', 'official', 'channel', 'live', 'stream', 'youtube', 'twitch']
+            if search_clean not in common_words:
+                if debug:
+                    print(f"[DEBUG] Search name contained in channel name")
+                return True
+            else:
+                if debug:
+                    print(f"[DEBUG] Ignoring common word match: '{search_clean}'")
         
         # Check if channel name is contained in search name
         if channel_clean in search_clean:
@@ -174,7 +180,7 @@ class VTuberFilters:
                 print(f"[DEBUG] Channel name contained in search name")
             return True
         
-        # Word-based matching (more flexible)
+        # Word-based matching (more restrictive)
         search_words = search_clean.split()
         channel_words = channel_clean.split()
         
@@ -188,27 +194,36 @@ class VTuberFilters:
             match_percentage = matching_words / len(search_words)
             if debug:
                 print(f"[DEBUG] Matching words: {matching_words}/{len(search_words)} ({match_percentage:.2f})")
-            if match_percentage >= 0.5:  # Lower threshold for fuzzy matching
+            if match_percentage >= 0.7:  # Higher threshold for better precision
                 return True
         
-        # Single word search - more flexible matching
+        # Single word search - more restrictive matching
         if len(search_words) == 1:
             search_word = search_words[0]
-            # Check if the search word appears in any channel word
+            # Avoid matching common words
+            common_words = ['gamer', 'tv', 'official', 'channel', 'live', 'stream', 'youtube', 'twitch', 'vtuber', 'virtual']
+            if search_word in common_words:
+                if debug:
+                    print(f"[DEBUG] Ignoring common word: '{search_word}'")
+                return False
+            
+            # Check if the search word appears in any channel word (but be more restrictive)
             for channel_word in channel_words:
-                if search_word in channel_word or channel_word in search_word:
-                    if debug:
-                        print(f"[DEBUG] Single word match: '{search_word}' in '{channel_word}'")
-                    return True
+                # Only match if the word is substantial (not just a few characters)
+                if len(search_word) >= 4 and len(channel_word) >= 4:
+                    if search_word in channel_word or channel_word in search_word:
+                        if debug:
+                            print(f"[DEBUG] Substantial word match: '{search_word}' in '{channel_word}'")
+                        return True
         
-        # Check for partial word matches (e.g., "luna" matches "lunaria")
+        # Check for partial word matches (more restrictive)
         for search_word in search_words:
             for channel_word in channel_words:
-                # Check if words share a common prefix or suffix
-                if (len(search_word) >= 3 and len(channel_word) >= 3 and
-                    (search_word[:3] in channel_word or channel_word[:3] in search_word)):
+                # Only match if words are substantial and share a significant prefix
+                if (len(search_word) >= 4 and len(channel_word) >= 4 and
+                    (search_word[:4] in channel_word or channel_word[:4] in search_word)):
                     if debug:
-                        print(f"[DEBUG] Partial word match: '{search_word}' ~ '{channel_word}'")
+                        print(f"[DEBUG] Substantial partial word match: '{search_word}' ~ '{channel_word}'")
                     return True
         
         if debug:
@@ -325,8 +340,15 @@ class VTuberFilters:
         # Check for negative keywords (reduce score)
         negative_matches = [neg for neg in self.negative_keywords if neg in all_text]
         if negative_matches:
-            score -= 3
+            score -= 5  # Increased penalty for negative indicators
             reasons.append(f"Negative indicators: {negative_matches}")
+        
+        # Additional penalty for clearly non-VTuber content
+        non_vtuber_indicators = ['gaming', 'gameplay', 'review', 'tutorial', 'news', 'music', 'cooking', 'fitness']
+        non_vtuber_matches = [ind for ind in non_vtuber_indicators if ind in all_text]
+        if non_vtuber_matches and not any(vt in all_text for vt in self.vtuber_keywords_high + self.vtuber_keywords_medium):
+            score -= 3
+            reasons.append(f"Non-VTuber content indicators: {non_vtuber_matches}")
         
         # Check for anime-related terms (bonus)
         anime_terms = ['anime', 'kawaii', 'moe', 'otaku', 'weeb', 'japanese', 'manga']
@@ -348,6 +370,11 @@ class VTuberFilters:
         if emoji_matches:
             score += 1
             reasons.append(f"Emoji/characters in name: {emoji_matches}")
+        
+        # Penalty for "gamer" channels without VTuber indicators
+        if 'gamer' in display_name.lower() and not any(vt in all_text for vt in self.vtuber_keywords_high + self.vtuber_keywords_medium):
+            score -= 2
+            reasons.append("Gamer channel without VTuber indicators")
         
         # Check for Japanese characters (still relevant for anime VTubers)
         japanese_pattern = re.compile(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]')
@@ -416,8 +443,15 @@ class VTuberFilters:
             print(f"[DEBUG] VTuber score for '{channel_name}': {score}")
             print(f"[DEBUG] Reasons: {reasons}")
         
-        # Higher threshold for better precision
-        return score >= 3
+        # Adaptive threshold based on platform
+        if platform == 'youtube':
+            # Balanced threshold for YouTube (not too permissive)
+            threshold = 2.5
+        else:
+            # Higher threshold for better precision on other platforms
+            threshold = 3
+        
+        return score >= threshold
     
     def is_vtuber_channel_with_tags(self, channel_data: Dict[str, Any], tags: List[str] = None, platform: str = 'twitch', debug: bool = False) -> bool:
         """Check if a channel is likely a VTuber including tag analysis"""
@@ -431,8 +465,14 @@ class VTuberFilters:
             if tags:
                 print(f"[DEBUG] Tags: {tags}")
         
-        # Lower threshold when tags are available (more confident)
-        threshold = 2 if tags else 3
+        # Adaptive threshold based on platform and tags
+        if platform == 'youtube':
+            # Much lower threshold for YouTube (more permissive)
+            threshold = 1.0 if tags else 1.5
+        else:
+            # Lower threshold when tags are available (more confident)
+            threshold = 2 if tags else 3
+        
         return score >= threshold
     
     def get_language_focus(self, channel_data: Dict[str, Any], platform: str = 'twitch') -> str:
@@ -503,8 +543,8 @@ class VTuberFilters:
                 adaptive_reasons.append(f"High viewer count bonus ({viewer_count})")
             
         else:  # YouTube
-            # Higher threshold for YouTube (more diverse content)
-            threshold = 2.5
+            # Balanced threshold for YouTube (not too permissive)
+            threshold = 2.0
             
             # Bonus for high subscriber count
             subscriber_count = channel_data.get('subscriber_count', '0')
@@ -543,5 +583,13 @@ class VTuberFilters:
             channel_name = channel_data.get('display_name', channel_data.get('snippet', {}).get('title', 'Unknown'))
             print(f"[DEBUG] Adaptive VTuber score for '{channel_name}': {score} (threshold: {threshold})")
             print(f"[DEBUG] Reasons: {reasons}")
+        
+        # For YouTube, use slightly lower threshold but not too permissive
+        if platform == 'youtube' and score < threshold:
+            # Allow channels with moderate scores for YouTube (but not too low)
+            if score >= 1.5:
+                if debug:
+                    print(f"[DEBUG] Allowing YouTube channel with moderate score: {score}")
+                return True
         
         return score >= threshold 
