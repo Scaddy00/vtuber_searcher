@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from .vtuber_filters import VTuberFilters
 
 class YouTubeScraper:
     """Scrapes YouTube for VTuber content creators"""
@@ -17,137 +18,16 @@ class YouTubeScraper:
         self.base_url = "https://www.googleapis.com/youtube/v3"
         self.youtube_service = build('youtube', 'v3', developerKey=api_key)
         
-        # VTuber keywords for filtering
-        self.vtuber_keywords = [
-            'vtuber', 'virtual', 'avatar', 'anime', 'kawaii', 'hololive', 
-            'nijisanji', 'vshojo', 'vspo', 'vtubing', 'live2d',
-            'rigging', 'model', 'character', 'streamer', 'content creator',
-            'virtual youtuber', 'virtual streamer', 'anime avatar'
-        ]
-        
-        # VTuber-related terms in descriptions
-        self.vtuber_indicators = [
-            'vtuber', 'virtual youtuber', 'virtual streamer', 'anime avatar',
-            'live2d', 'rigging', 'model', 'character', 'vtubing',
-            'hololive', 'nijisanji', 'vshojo', 'vspo', 'vtuber'
-        ]
+        # Initialize VTuber filters
+        self.filters = VTuberFilters()
     
     def _is_vtuber_channel(self, channel_info: Dict[str, Any], debug: bool = False) -> bool:
         """Check if a channel is likely a VTuber based on various indicators"""
-        
-        # Get text to analyze
-        title = channel_info.get('snippet', {}).get('title', '').lower()
-        description = channel_info.get('snippet', {}).get('description', '').lower()
-        
-        # Combine all text for analysis
-        all_text = f"{title} {description}".lower()
-        
-        # Check for VTuber keywords in title
-        title_has_keywords = any(keyword in title for keyword in self.vtuber_keywords)
-        
-        # Check for VTuber indicators in description
-        desc_has_indicators = any(indicator in description for indicator in self.vtuber_indicators)
-        
-        # Check for anime-related terms
-        anime_terms = ['anime', 'kawaii', 'moe', 'otaku', 'weeb', 'japanese']
-        has_anime_terms = any(term in all_text for term in anime_terms)
-        
-        # Check for streaming/content creation terms
-        streaming_terms = ['streamer', 'content creator', 'live', 'gaming', 'chat']
-        has_streaming_terms = any(term in all_text for term in streaming_terms)
-        
-        # Check for YouTube-specific VTuber terms
-        youtube_vtuber_terms = ['virtual youtuber', 'vtuber', 'live2d', 'avatar']
-        has_youtube_vtuber_terms = any(term in all_text for term in youtube_vtuber_terms)
-        
-        # Scoring system
-        score = 0
-        
-        if title_has_keywords:
-            score += 3
-        if desc_has_indicators:
-            score += 3
-        if has_anime_terms:
-            score += 1
-        if has_streaming_terms:
-            score += 1
-        if has_youtube_vtuber_terms:
-            score += 2
-        
-        # Debug mode
-        if debug:
-            print(f"[DEBUG] Channel: {title}")
-            print(f"[DEBUG] Score: {score}")
-            print(f"[DEBUG] Title keywords: {title_has_keywords}")
-            print(f"[DEBUG] Desc indicators: {desc_has_indicators}")
-            print(f"[DEBUG] Anime terms: {has_anime_terms}")
-            print(f"[DEBUG] Streaming terms: {has_streaming_terms}")
-            print(f"[DEBUG] YouTube VTuber terms: {has_youtube_vtuber_terms}")
-            print(f"[DEBUG] Description: {description[:200]}...")
-            print("---")
-        
-        # Lower threshold for YouTube (more permissive)
-        return score >= 1  # Changed from 2 to 1
+        return self.filters.is_vtuber_channel(channel_info, platform='youtube', debug=debug)
     
     def _is_name_match(self, channel_title: str, search_name: str, debug: bool = False) -> bool:
         """Check if the channel title matches the search name"""
-        
-        # Normalize both names for comparison
-        channel_lower = channel_title.lower().strip()
-        search_lower = search_name.lower().strip()
-        
-        if debug:
-            print(f"[DEBUG] Comparing: '{channel_lower}' vs '{search_lower}'")
-        
-        # Exact match (highest priority)
-        if channel_lower == search_lower:
-            if debug:
-                print(f"[DEBUG] Exact match found!")
-            return True
-        
-        # Check if search name is contained in channel title
-        if search_lower in channel_lower:
-            if debug:
-                print(f"[DEBUG] Search name contained in channel title")
-            return True
-        
-        # Check if channel title is contained in search name
-        if channel_lower in search_lower:
-            if debug:
-                print(f"[DEBUG] Channel title contained in search name")
-            return True
-        
-        # Check for partial matches (words) - more flexible
-        search_words = search_lower.split()
-        channel_words = channel_lower.split()
-        
-        if debug:
-            print(f"[DEBUG] Search words: {search_words}")
-            print(f"[DEBUG] Channel words: {channel_words}")
-        
-        # If search name has multiple words, check if most words match
-        if len(search_words) > 1:
-            matching_words = sum(1 for word in search_words if any(word in cw for cw in channel_words))
-            match_percentage = matching_words / len(search_words)
-            if debug:
-                print(f"[DEBUG] Matching words: {matching_words}/{len(search_words)} ({match_percentage:.2f})")
-            if match_percentage >= 0.6:  # Lowered from 0.7 to 0.6
-                return True
-        
-        # Single word search - more flexible matching
-        if len(search_words) == 1:
-            search_word = search_words[0]
-            # Check if the search word appears in any channel word
-            for channel_word in channel_words:
-                if search_word in channel_word or channel_word in search_word:
-                    if debug:
-                        print(f"[DEBUG] Single word match: '{search_word}' in '{channel_word}'")
-                    return True
-        
-        if debug:
-            print(f"[DEBUG] No match found")
-        
-        return False
+        return self.filters.is_name_match(channel_title, search_name, debug)
     
     async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make request to YouTube Data API"""
@@ -245,6 +125,9 @@ class YouTubeScraper:
                         print(f"[DEBUG] Channel '{channel_title}' - VTuber: {is_vtuber}")
                     
                     if channel and is_vtuber:
+                        score, reasons = self.filters.calculate_vtuber_score(channel, platform='youtube')
+                        language_focus = self.filters.get_language_focus(channel, platform='youtube')
+                        
                         vtuber = {
                             'platform': 'youtube',
                             'id': channel['id'],
@@ -256,6 +139,9 @@ class YouTubeScraper:
                             'video_count': channel.get('statistics', {}).get('videoCount', '0'),
                             'view_count': channel.get('statistics', {}).get('viewCount', '0'),
                             'description': channel['snippet'].get('description', ''),
+                            'vtuber_score': score,
+                            'vtuber_reasons': reasons,
+                            'language_focus': language_focus,
                             'discovered_at': datetime.now().isoformat()
                         }
                         vtubers.append(vtuber)

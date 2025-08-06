@@ -41,7 +41,8 @@ def search():
                     vtuber_name=vtuber_name,
                     twitch_client_id=twitch_client_id,
                     twitch_client_secret=twitch_client_secret,
-                    youtube_api_key=youtube_api_key
+                    youtube_api_key=youtube_api_key,
+                    debug=True
                 )
             )
         finally:
